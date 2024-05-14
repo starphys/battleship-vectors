@@ -1,6 +1,7 @@
 const maxAcc = 25
 const maxVel = 50
 const handlerTimeout = 16 // ms
+const debug = false
 
 const canvas = document.querySelector('canvas')
 const context = canvas.getContext('2d')
@@ -26,8 +27,8 @@ function drawGameOver () {
   context.fillText(game.winner === 'p1' ? 'You got them!' : 'They got you.', canvas.width / 2, canvas.height / 2)
 }
 
-function generateRandomSeed() {
-    return Math.floor(Math.random() * (2 ** 32))
+function generateRandomSeed () {
+  return Math.floor(Math.random() * (2 ** 32))
 }
 
 class LCG {
@@ -56,13 +57,12 @@ class Shot {
   }
 
   draw (player = 'p1') {
-    if (player === 'p1') {
-        context.beginPath()
-        context.arc(this.center.x, this.center.y, this.radius, 0, 360)
-        context.strokeStyle = 'white'
-        context.stroke()
+    if (debug || player === 'p1') {
+      context.beginPath()
+      context.arc(this.center.x, this.center.y, this.radius, 0, 360)
+      context.strokeStyle = 'white'
+      context.stroke()
     }
-
 
     this.drawX(player === 'p1' ? 'white' : 'orange')
   }
@@ -80,6 +80,22 @@ class Shot {
     context.lineTo(this.center.x - length, this.center.y + length)
     context.strokeStyle = color
     context.stroke()
+  }
+
+  getRandomPoint (rng) {
+    const angle = rng.next() * Math.PI * 2
+    return {
+      x: this.center.x + Math.cos(angle) * this.radius,
+      y: this.center.y + Math.sin(angle) * this.radius
+    }
+  }
+
+  getRandomPointInBounds (rng) {
+    const point = this.getRandomPoint(rng)
+    return {
+      x: Math.max(0, Math.min(point.x, canvas.width)),
+      y: Math.max(0, Math.min(point.y, canvas.height))
+    }
   }
 }
 
@@ -222,8 +238,8 @@ class StateMachine {
 
   transition (action) {
     if (action === 'gameover') {
-        this.state = 'gameover'
-        return
+      this.state = 'gameover'
+      return
     }
     switch (this.state) {
       case 'prompt': // In the prompt state, wait for user input
@@ -269,12 +285,12 @@ class Game {
     const rng1 = new LCG(seed1)
     this.p1 = new Player({
       position: {
-        x: rng1.nextInt(10, canvas.width-10),
-        y: rng1.nextInt(10, canvas.height-10)
+        x: rng1.nextInt(10, canvas.width - 10),
+        y: rng1.nextInt(10, canvas.height - 10)
       },
       velocity: {
-        x: rng1.nextInt(0, maxVel+1),
-        y: rng1.nextInt(0, maxVel+1)
+        x: rng1.nextInt(0, maxVel + 1),
+        y: rng1.nextInt(0, maxVel + 1)
       },
       radius: 10,
       player: 'p1'
@@ -283,12 +299,12 @@ class Game {
     const rng2 = new LCG(seed2)
     this.p2 = new Player({
       position: {
-        x: rng2.nextInt(10, canvas.width-10),
-        y: rng2.nextInt(10, canvas.height-10)
+        x: rng2.nextInt(10, canvas.width - 10),
+        y: rng2.nextInt(10, canvas.height - 10)
       },
       velocity: {
-        x: rng2.nextInt(0, maxVel+1),
-        y: rng2.nextInt(0, maxVel+1)
+        x: rng2.nextInt(0, maxVel + 1),
+        y: rng2.nextInt(0, maxVel + 1)
       },
       radius: 10,
       player: 'p2'
@@ -308,20 +324,23 @@ class Game {
 
   getMoves () {
     // Get from peer
-    this.p2Moves.push( this.aiRNG.nextInt(0,2) ? { 
-        state:  'accelerate',
-        data: { 
-            x: this.aiRNG.nextInt(-canvas.width, canvas.width), 
-            y: this.aiRNG.nextInt(-canvas.height, canvas.height) 
-        } 
-    } : {
-        state:  'shoot',
-        data: { 
-            x: this.aiRNG.nextInt(0, canvas.width), 
-            y: this.aiRNG.nextInt(0, canvas.height) 
-        } 
-    }
-    )
+    this.p2Moves.push(this.aiRNG.nextInt(0, 2)
+      ? {
+          state: 'accelerate',
+          data: {
+            x: this.aiRNG.nextInt(-canvas.width, canvas.width),
+            y: this.aiRNG.nextInt(-canvas.height, canvas.height)
+          }
+        }
+      : {
+          state: 'shoot',
+          data: this.p2Shots.length > 0
+            ? { ...this.p2Shots.at(-1).getRandomPointInBounds(this.aiRNG) }
+            : {
+                x: this.aiRNG.nextInt(0, canvas.width),
+                y: this.aiRNG.nextInt(0, canvas.height)
+              }
+        })
   }
 
   computeShots ({ p1Moves, p2Moves, player }) {
@@ -329,19 +348,19 @@ class Game {
     let tempP2
 
     const p2Positions = p2Moves.map(({ state, data }) => {
-        console.log(tempP2)
+      console.log(tempP2)
       if (state === 'init') {
         tempP2 = new Player({
-        position: {
-            x: rng.nextInt(10, canvas.width-10),
-            y: rng.nextInt(10, canvas.height-10)
-        },
-        velocity: {
-            x: rng.nextInt(0, maxVel+1),
-            y: rng.nextInt(0, maxVel+1)
-        },
-        radius: 10,
-        player: player === 'p1' ? 'p2' : 'p1'
+          position: {
+            x: rng.nextInt(10, canvas.width - 10),
+            y: rng.nextInt(10, canvas.height - 10)
+          },
+          velocity: {
+            x: rng.nextInt(0, maxVel + 1),
+            y: rng.nextInt(0, maxVel + 1)
+          },
+          radius: 10,
+          player: player === 'p1' ? 'p2' : 'p1'
         })
       } else if (state === 'shoot') {
         tempP2.update({ acceleration: new Vector() })
@@ -352,7 +371,7 @@ class Game {
       return tempP2.position.copy()
     })
 
-    if ( player === 'p1') { this.p2 = tempP2.copy() }
+    if (player === 'p1') { this.p2 = tempP2.copy() }
 
     console.log(p2Positions.at(-1))
     const shots = p1Moves.map(({ state, data }, i) => {
@@ -389,7 +408,7 @@ class Game {
 
       // Check that everything makes sense before simulation
       this.computeGameState({ state, data })
-    
+
       if (this.winner === '') {
         this.stateMachine.transition('prompt')
       } else {
@@ -404,10 +423,12 @@ class Game {
     if (this.winner === '') {
       drawBackground()
       this.p1.draw()
+      debug && this.p2.draw()
       this.drawShots()
     } else {
       drawBackground()
       this.p1.draw()
+      debug && this.p2.draw()
       this.drawShots()
       drawGameOver(this.winner)
     }
@@ -434,7 +455,7 @@ let wait = false
 window.addEventListener('mousemove',
   (e) => {
     if (wait) { return }
-    mousePosition = getCanvasCoordinates(e)
+    const mousePosition = getCanvasCoordinates(e)
     if (game.stateMachine.getState() === 'accelerate') {
       const acceleration = new Vector(
         mousePosition.x - game.p1.position.x,
@@ -445,7 +466,7 @@ window.addEventListener('mousemove',
       acceleration.draw({ x: game.p1.position.x, y: game.p1.position.y })
     }
     wait = true
-    setTimeout(() => {wait = false}, handlerTimeout)
+    setTimeout(() => { wait = false }, handlerTimeout)
   }
 )
 
