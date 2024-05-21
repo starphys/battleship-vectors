@@ -1,5 +1,6 @@
 const maxAcc = 25
 const maxVel = 50
+const closeMult = 10
 const handlerTimeout = 16 // ms
 const debug = false
 
@@ -221,6 +222,43 @@ class Player {
     })
   }
 
+  closeToEdge () {
+    const close = closeMult * this.radius
+    return this.position.x < close ||
+           this.position.y < close ||
+           this.position.x > canvas.width - close ||
+           this.position.y > canvas.height - close
+  }
+
+  getRandomXYAwayFromEdge (rng) {
+    const close = closeMult * this.radius
+    const randomXY = {
+      x: rng.nextInt(-canvas.width, canvas.width),
+      y: rng.nextInt(-canvas.height, canvas.height)
+    }
+    if (!this.closeToEdge()) { return randomXY }
+
+    let x
+    if (this.position.x < close) {
+      x = canvas.width
+    } else if (this.position.x > canvas.width - close) {
+      x = -canvas.width
+    } else {
+      x = randomXY.x
+    }
+
+    let y
+    if (this.position.y < close) {
+      y = canvas.height
+    } else if (this.position.y > canvas.height - close) {
+      y = -canvas.height
+    } else {
+      y = randomXY.y
+    }
+
+    return { x, y }
+  }
+
   update ({ acceleration }) {
     acceleration.normalize().scale(maxAcc)
 
@@ -389,13 +427,10 @@ class Game {
 
   getMoves () {
     // Get from peer
-    this.p2Moves.push(this.aiRNG.nextInt(0, 2)
+    this.p2Moves.push(this.p2.closeToEdge() || this.aiRNG.nextInt(0, 2)
       ? {
           state: 'accelerate',
-          data: {
-            x: this.aiRNG.nextInt(-canvas.width, canvas.width),
-            y: this.aiRNG.nextInt(-canvas.height, canvas.height)
-          }
+          data: { ...this.p2.getRandomXYAwayFromEdge(this.aiRNG) }
         }
       : {
           state: 'shoot',
@@ -532,12 +567,12 @@ window.addEventListener('mousemove',
       game.draw()
       acceleration.draw({ x: game.p1.position.x, y: game.p1.position.y })
     } else if (prevState === 'analyze' && analyzePoint.x >= 0 && analyzePoint.y >= 0) {
-        const ruler = new RuledLine({
-            tail: {...analyzePoint},
-            head: {...coord}
-        })
-        game.draw()
-        ruler.draw()
+      const ruler = new RuledLine({
+        tail: { ...analyzePoint },
+        head: { ...coord }
+      })
+      game.draw()
+      ruler.draw()
     }
     wait = true
     setTimeout(() => { wait = false }, handlerTimeout)
@@ -553,7 +588,7 @@ document.getElementById('shoot-btn')
 document.getElementById('analyze-btn')
   .addEventListener('click', () => game.changeModes('analyze'))
 
-let analyzePoint = {x: -1, y: -1}
+let analyzePoint = { x: -1, y: -1 }
 canvas.addEventListener('click',
   (event) => {
     const prevState = game.stateMachine.getState()
@@ -572,7 +607,7 @@ canvas.addEventListener('click',
       game.stateMachine.transition('sync')
       game.update({ state: prevState, data: { ...coord } })
     } else if (prevState === 'analyze') {
-      analyzePoint = {...coord}
+      analyzePoint = { ...coord }
     } else {
       return
     }
