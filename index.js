@@ -169,6 +169,41 @@ class Vector {
   }
 }
 
+class RuledLine {
+  constructor ({ head, tail }) {
+    this.head = new Vector(head.x, head.y)
+    this.tail = new Vector(tail.x, tail.y)
+    this.length = this.head.copy().subtract(this.tail).length()
+    this.unit = this.head.copy().subtract(this.tail).normalize()
+  }
+
+  draw (tickSpacing = 10, tickLength = 10) {
+    context.beginPath()
+    context.moveTo(this.tail.x, this.tail.y)
+    context.lineTo(this.head.x, this.head.y)
+    context.strokeStyle = 'white'
+    context.stroke()
+
+    const numTicks = Math.ceil(this.length / tickSpacing)
+
+    for (let i = 0; i < numTicks; i++) {
+      const tickSize = i % 5 === 0 ? tickLength : tickLength / 2
+      const tickX = this.tail.x + this.unit.x * tickSpacing * (i)
+      const tickY = this.tail.y + this.unit.y * tickSpacing * (i)
+
+      const perpX = -this.unit.y
+      const perpY = this.unit.x
+
+      // Draw the tick
+      context.beginPath()
+      context.moveTo(tickX - perpX * tickSize, tickY - perpY * tickSize)
+      context.lineTo(tickX + perpX * tickSize, tickY + perpY * tickSize)
+      context.strokeStyle = 'white'
+      context.stroke()
+    }
+  }
+}
+
 class Player {
   constructor ({ position, velocity, radius, player }) {
     this.position = new Vector(position.x, position.y)
@@ -228,8 +263,16 @@ class Player {
 
 class StateMachine {
   constructor (initialState) {
-    if (!(initialState in ['prompt', 'shoot', 'accelerate', 'sync', 'gameover'])) { initialState = 'prompt' }
-    this.state = initialState
+    this.states = {
+      prompt: ['shoot', 'accelerate', 'analyze'],
+      shoot: ['accelerate', 'sync', 'analyze'],
+      accelerate: ['shoot', 'sync', 'analyze'],
+      sync: ['prompt'],
+      analyze: ['shoot', 'accelerate'],
+      gameover: []
+    }
+
+    this.state = this.states[initialState] ? initialState : 'prompt'
   }
 
   getState () {
@@ -241,32 +284,53 @@ class StateMachine {
       this.state = 'gameover'
       return
     }
-    switch (this.state) {
-      case 'prompt': // In the prompt state, wait for user input
-        if (action === 'shoot') {
-          this.state = 'shoot'
-        } else if (action === 'accelerate') {
-          this.state = 'accelerate'
-        }
+
+    if (this.states[this.state].includes(action)) {
+      this.state = action
+    }
+  }
+}
+
+class UIManager {
+  constructor () {
+    this.accelerateBtn = document.getElementById('accelerate-btn')
+    this.shootBtn = document.getElementById('shoot-btn')
+    this.analyzeBtn = document.getElementById('analyze-btn')
+    this.acceleratePrompt = document.getElementById('accelerate-prompt')
+    this.shootPrompt = document.getElementById('shoot-prompt')
+    this.analyzePrompt = document.getElementById('analyze-prompt')
+  }
+
+  updateUI (state) {
+    // Enable all buttons and hide all prompts
+    this.accelerateBtn.disabled = false
+    this.shootBtn.disabled = false
+    this.analyzeBtn.disabled = false
+    this.acceleratePrompt.style.display = 'none'
+    this.shootPrompt.style.display = 'none'
+    this.analyzePrompt.style.display = 'none'
+    canvas.classList.remove('shooting')
+
+    switch (state) {
+      case 'prompt':
         break
-      case 'accelerate': // In the acc state, constantly collect theta
-        if (action === 'shoot') {
-          this.state = 'shoot'
-        } else if (action === 'confirm') {
-          this.state = 'sync'
-        }
+      case 'shoot':
+        this.shootBtn.disabled = true
+        this.shootPrompt.style.display = 'block'
+        canvas.classList.add('shooting')
         break
-      case 'shoot': // In the acc state, constantly collect xy
-        if (action === 'accelerate') {
-          this.state = 'accelerate'
-        } else if (action === 'confirm') {
-          this.state = 'sync'
-        }
+      case 'accelerate':
+        this.accelerateBtn.disabled = true
+        this.acceleratePrompt.style.display = 'block'
         break
-      case 'sync': // In the sync state, send data and wait for new data
-        if (action === 'prompt') {
-          this.state = 'prompt'
-        }
+      case 'sync':
+        // Perform sync actions
+        break
+      case 'analyze':
+        this.analyzeBtn.disabled = true
+        this.analyzePrompt.style.display = 'block'
+        break
+      case 'gameover':
         break
       default:
         break
@@ -281,6 +345,7 @@ class Game {
     this.p1Moves = [{ state: 'init', data: { seed: seed1 } }]
     this.p2Moves = [{ state: 'init', data: { seed: seed2 } }]
     this.stateMachine = new StateMachine('prompt')
+    this.uiManager = new UIManager()
 
     const rng1 = new LCG(seed1)
     this.p1 = new Player({
@@ -348,7 +413,6 @@ class Game {
     let tempP2
 
     const p2Positions = p2Moves.map(({ state, data }) => {
-      console.log(tempP2)
       if (state === 'init') {
         tempP2 = new Player({
           position: {
@@ -373,7 +437,6 @@ class Game {
 
     if (player === 'p1') { this.p2 = tempP2.copy() }
 
-    console.log(p2Positions.at(-1))
     const shots = p1Moves.map(({ state, data }, i) => {
       if (state === 'shoot') {
         const dx = data.x - p2Positions[i].x
@@ -398,6 +461,12 @@ class Game {
   drawShots () {
     this.p1Shots.forEach(shot => shot.draw('p1'))
     this.p2Shots.forEach(shot => shot.draw('p2'))
+  }
+
+  changeModes (action) {
+    game.stateMachine.transition(action)
+    game.uiManager.updateUI(game.stateMachine.getState())
+    game.draw()
   }
 
   update ({ state, data }) {
@@ -435,9 +504,6 @@ class Game {
   }
 }
 
-const game = new Game(generateRandomSeed(), generateRandomSeed())
-game.draw()
-
 function getCanvasCoordinates (event) {
   const rect = canvas.getBoundingClientRect()
   const scaleX = canvas.width / rect.width
@@ -455,65 +521,69 @@ let wait = false
 window.addEventListener('mousemove',
   (e) => {
     if (wait) { return }
-    const mousePosition = getCanvasCoordinates(e)
-    if (game.stateMachine.getState() === 'accelerate') {
+    const prevState = game.stateMachine.getState()
+    const coord = getCanvasCoordinates(e)
+    if (prevState === 'accelerate') {
       const acceleration = new Vector(
-        mousePosition.x - game.p1.position.x,
-        mousePosition.y - game.p1.position.y
+        coord.x - game.p1.position.x,
+        coord.y - game.p1.position.y
       ).normalize().scale(maxAcc)
 
       game.draw()
       acceleration.draw({ x: game.p1.position.x, y: game.p1.position.y })
+    } else if (prevState === 'analyze' && analyzePoint.x >= 0 && analyzePoint.y >= 0) {
+        const ruler = new RuledLine({
+            tail: {...analyzePoint},
+            head: {...coord}
+        })
+        game.draw()
+        ruler.draw()
     }
     wait = true
     setTimeout(() => { wait = false }, handlerTimeout)
   }
 )
 
-document.getElementById('accelerate-btn').addEventListener('click',
-  (e) => {
-    document.getElementById('accelerate-btn').disabled = true
-    document.getElementById('shoot-btn').disabled = false
-    document.getElementById('accelerate-prompt').style.display = 'block'
-    document.getElementById('shoot-prompt').style.display = 'none'
-    canvas.classList.remove('shooting')
+document.getElementById('accelerate-btn')
+  .addEventListener('click', () => game.changeModes('accelerate'))
 
-    game.stateMachine.transition('accelerate')
-  })
+document.getElementById('shoot-btn')
+  .addEventListener('click', () => game.changeModes('shoot'))
 
-document.getElementById('shoot-btn').addEventListener('click',
-  () => {
-    document.getElementById('accelerate-btn').disabled = false
-    document.getElementById('shoot-btn').disabled = true
-    document.getElementById('accelerate-prompt').style.display = 'none'
-    document.getElementById('shoot-prompt').style.display = 'block'
-    canvas.classList.add('shooting')
+document.getElementById('analyze-btn')
+  .addEventListener('click', () => game.changeModes('analyze'))
 
-    game.stateMachine.transition('shoot')
-    game.draw()
-  })
-
+let analyzePoint = {x: -1, y: -1}
 canvas.addEventListener('click',
   (event) => {
     const prevState = game.stateMachine.getState()
+    const coord = getCanvasCoordinates(event)
+
     if (prevState === 'accelerate') {
-      game.stateMachine.transition('confirm')
-      const coord = getCanvasCoordinates(event)
-      game.update({ state: prevState, data: { x: coord.x - game.p1.position.x, y: coord.y - game.p1.position.y } })
-      game.draw()
+      game.stateMachine.transition('sync')
+      game.update({
+        state: prevState,
+        data: {
+          x: coord.x - game.p1.position.x,
+          y: coord.y - game.p1.position.y
+        }
+      })
     } else if (prevState === 'shoot') {
-      game.stateMachine.transition('confirm')
-      game.update({ state: prevState, data: { ...getCanvasCoordinates(event) } })
-      game.draw()
+      game.stateMachine.transition('sync')
+      game.update({ state: prevState, data: { ...coord } })
+    } else if (prevState === 'analyze') {
+      analyzePoint = {...coord}
+    } else {
+      return
     }
-    canvas.classList.remove('shooting')
-    document.getElementById('accelerate-btn').disabled = false
-    document.getElementById('shoot-btn').disabled = false
-    document.getElementById('accelerate-prompt').style.display = 'none'
-    document.getElementById('shoot-prompt').style.display = 'none'
+
+    game.draw()
+    game.uiManager.updateUI(game.stateMachine.getState())
   }
 )
 
-document.getElementById('accelerate-prompt').style.display = 'none'
-document.getElementById('shoot-prompt').style.display = 'none'
+const game = new Game(generateRandomSeed(), generateRandomSeed())
+game.uiManager.updateUI(game.stateMachine.getState())
+game.draw()
+
 window.game = game
