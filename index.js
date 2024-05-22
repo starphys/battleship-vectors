@@ -2,7 +2,24 @@ const maxAcc = 25
 const maxVel = 50
 const closeMult = 10
 const handlerTimeout = 16 // ms
-const debug = false
+
+const MODES = {
+  tutorial: {
+    showEnemy: true,
+    ai: true,
+    multiplayer: false
+  },
+  ai: {
+    showEnemy: false,
+    ai: true,
+    multiplayer: false
+  },
+  multiplayer: {
+    showEnemy: false,
+    ai: false,
+    multiplayer: true
+  }
+}
 
 const canvas = document.querySelector('canvas')
 const context = canvas.getContext('2d')
@@ -12,13 +29,17 @@ canvas.height = 600
 
 function drawBackground () {
   context.beginPath()
+  context.fillStyle = 'rgba(100, 100, 100, 0.5)'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+
+  context.beginPath()
   context.strokeStyle = 'white'
   context.strokeRect(0, 0, canvas.width, canvas.height)
 }
 
 function drawGameOver () {
   context.beginPath()
-  context.fillStyle = 'rgba(100, 100, 100, 0.7)'
+  context.fillStyle = 'rgba(100, 100, 100, 0.5)'
   context.fillRect(0, 0, canvas.width, canvas.height)
 
   context.textAlign = 'center'
@@ -51,6 +72,28 @@ class LCG {
   }
 }
 
+class Path {
+  constructor ({ head, tail }) {
+    this.head = new Vector(head.x, head.y)
+    this.tail = new Vector(tail.x, tail.y)
+    this.radius = 5
+  }
+
+  draw (dashPattern = [10, 5], color = 'red') {
+    context.beginPath()
+    context.arc(this.tail.x, this.tail.y, this.radius, 0, 360)
+    context.strokeStyle = color
+    context.stroke()
+
+    context.beginPath()
+    context.setLineDash(dashPattern)
+    context.moveTo(this.tail.x, this.tail.y)
+    context.lineTo(this.head.x, this.head.y)
+    context.strokeStyle = color
+    context.stroke()
+    context.setLineDash([])
+  }
+}
 class Shot {
   constructor (center, radius) {
     this.center = center
@@ -58,7 +101,7 @@ class Shot {
   }
 
   draw (player = 'p1') {
-    if (debug || player === 'p1') {
+    if (player === 'p1') {
       context.beginPath()
       context.arc(this.center.x, this.center.y, this.radius, 0, 360)
       context.strokeStyle = 'white'
@@ -377,13 +420,18 @@ class UIManager {
 }
 
 class Game {
-  constructor (seed1, seed2) {
+  constructor (seed1, seed2, mode) {
     this.seed1 = seed1
     this.seed2 = seed2
     this.p1Moves = [{ state: 'init', data: { seed: seed1 } }]
     this.p2Moves = [{ state: 'init', data: { seed: seed2 } }]
     this.stateMachine = new StateMachine('prompt')
     this.uiManager = new UIManager()
+
+    const modeSelected = MODES[mode]
+    this.showEnemy = modeSelected.showEnemy
+    this.ai = modeSelected.ai
+    this.multiplayer = modeSelected.multiplayer
 
     const rng1 = new LCG(seed1)
     this.p1 = new Player({
@@ -426,24 +474,27 @@ class Game {
   }
 
   getMoves () {
-    // Get from peer
-    this.p2Moves.push(this.p2.closeToEdge() || this.aiRNG.nextInt(0, 2)
-      ? {
-          state: 'accelerate',
-          data: { ...this.p2.getRandomXYAwayFromEdge(this.aiRNG) }
-        }
-      : {
-          state: 'shoot',
-          data: this.p2Shots.length > 0
-            ? { ...this.p2Shots.at(-1).getRandomPointInBounds(this.aiRNG) }
-            : {
-                x: this.aiRNG.nextInt(0, canvas.width),
-                y: this.aiRNG.nextInt(0, canvas.height)
-              }
-        })
+    if (this.ai) {
+      this.p2Moves.push(this.p2.closeToEdge() || this.aiRNG.nextInt(0, 2)
+        ? {
+            state: 'accelerate',
+            data: { ...this.p2.getRandomXYAwayFromEdge(this.aiRNG) }
+          }
+        : {
+            state: 'shoot',
+            data: this.p2Shots.length > 0
+              ? { ...this.p2Shots.at(-1).getRandomPointInBounds(this.aiRNG) }
+              : {
+                  x: this.aiRNG.nextInt(0, canvas.width),
+                  y: this.aiRNG.nextInt(0, canvas.height)
+                }
+          })
+    } else if (this.multiplayer) {
+      // Get moves from peer
+    }
   }
 
-  computeShots ({ p1Moves, p2Moves, player }) {
+  computeStates ({ p1Moves, p2Moves, player }) {
     const rng = new LCG(player === 'p1' ? this.seed2 : this.seed1)
     let tempP2
 
@@ -483,19 +534,29 @@ class Game {
       return null
     }).filter(x => x)
 
-    return shots
+    return { shots, paths: p2Positions.reduce((acc, _, i, arr) => { i && acc.push(new Path({ tail: { ...arr[i - 1] }, head: { ...arr[i] } })); return acc }, []) }
   }
 
   computeGameState ({ state, data }) {
     this.p1.update({ acceleration: state === 'accelerate' ? new Vector(data.x, data.y) : new Vector() })
 
-    this.p1Shots = this.computeShots({ p1Moves: this.p1Moves, p2Moves: this.p2Moves, player: 'p1' })
-    this.p2Shots = this.computeShots({ p1Moves: this.p2Moves, p2Moves: this.p1Moves, player: 'p2' })
+    const { shots: p1Shots, paths: p2Paths } = this.computeStates({ p1Moves: this.p1Moves, p2Moves: this.p2Moves, player: 'p1' })
+    this.p1Shots = p1Shots
+    this.p2Paths = p2Paths
+
+    const { shots: p2Shots, paths: p1Paths } = this.computeStates({ p1Moves: this.p2Moves, p2Moves: this.p1Moves, player: 'p2' })
+    this.p2Shots = p2Shots
+    this.p1Paths = p1Paths
   }
 
   drawShots () {
     this.p1Shots.forEach(shot => shot.draw('p1'))
     this.p2Shots.forEach(shot => shot.draw('p2'))
+  }
+
+  drawPaths () {
+    this.p1Paths.forEach(path => path.draw())
+    this.p2Paths.forEach(path => path.draw([10, 5], 'blue'))
   }
 
   changeModes (action) {
@@ -510,7 +571,7 @@ class Game {
       this.makeMove({ state, data })
       this.getMoves()
 
-      // Check that everything makes sense before simulation
+      // TODO: Check that everything makes sense before simulation
       this.computeGameState({ state, data })
 
       if (this.winner === '') {
@@ -527,17 +588,23 @@ class Game {
     if (this.winner === '') {
       drawBackground()
       this.p1.draw()
-      debug && this.p2.draw()
+      this.showEnemy && this.p2.draw()
       this.drawShots()
     } else {
       drawBackground()
       this.p1.draw()
-      debug && this.p2.draw()
+      this.p2.draw()
       this.drawShots()
       drawGameOver(this.winner)
+      this.drawPaths()
     }
   }
 }
+
+let game = new Game(generateRandomSeed(), generateRandomSeed(), 'tutorial')
+game.uiManager.updateUI(game.stateMachine.getState())
+game.draw()
+window.game = game
 
 function getCanvasCoordinates (event) {
   const rect = canvas.getBoundingClientRect()
@@ -617,8 +684,9 @@ canvas.addEventListener('click',
   }
 )
 
-const game = new Game(generateRandomSeed(), generateRandomSeed())
-game.uiManager.updateUI(game.stateMachine.getState())
-game.draw()
-
-window.game = game
+document.getElementById('new-game-btn').addEventListener('click', () => {
+  const selectedMode = document.getElementById('modeSelect').value || 'tutorial'
+  game = new Game(generateRandomSeed(), generateRandomSeed(), selectedMode)
+  game.uiManager.updateUI(game.stateMachine.getState())
+  game.draw()
+})
