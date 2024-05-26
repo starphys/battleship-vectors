@@ -100,18 +100,18 @@ class Shot {
     this.radius = radius
   }
 
-  draw (player = 'p1') {
-    if (player === 'p1') {
+  draw (drawCircle = true, color = 'white') {
+    if (drawCircle) {
       context.beginPath()
       context.arc(this.center.x, this.center.y, this.radius, 0, 360)
-      context.strokeStyle = 'white'
+      context.strokeStyle = color
       context.stroke()
     }
 
-    this.drawX(player === 'p1' ? 'white' : 'orange')
+    this.drawX(color)
   }
 
-  drawX (color = 'p1') {
+  drawX (color = 'white') {
     const length = 10
     context.beginPath()
     context.moveTo(this.center.x - length, this.center.y - length)
@@ -495,11 +495,12 @@ class Game {
   }
 
   computeStates ({ p1Moves, p2Moves, player }) {
-    const rng = new LCG(player === 'p1' ? this.seed2 : this.seed1)
+    let rng
     let tempP2
 
     const p2Positions = p2Moves.map(({ state, data }) => {
       if (state === 'init') {
+        rng = new LCG(data.seed)
         tempP2 = new Player({
           position: {
             x: rng.nextInt(10, canvas.width - 10),
@@ -550,8 +551,8 @@ class Game {
   }
 
   drawShots () {
-    this.p1Shots.forEach(shot => shot.draw('p1'))
-    this.p2Shots.forEach(shot => shot.draw('p2'))
+    this.p1Shots.slice(-6).forEach(shot => shot.draw(true, 'white'))
+    this.p2Shots.forEach(shot => shot.draw(this.showEnemy, 'orange'))
   }
 
   drawPaths () {
